@@ -38,19 +38,25 @@ CREATE SEQUENCE IF NOT EXISTS MRT_DATA.CONFIG_SEQ
 *************************************************************************************************************/
 DROP INDEX IF EXISTS MRT_DATA.CONFIG_PK;
 DROP INDEX IF EXISTS MRT_DATA.IDX_CONFIG;
+
 DROP TABLE IF EXISTS MRT_DATA.CONFIGURATIONS CASCADE;
 
 CREATE CACHED TABLE IF NOT EXISTS MRT_DATA.CONFIGURATIONS (
-    Config_ID    VARCHAR(15) AS MRT_DATA.NEW_PID(NEXTVAL('MRT_DATA.CONFIG_SEQ')),
-    Parent_ID    VARCHAR(15),
-    Config_Value VARCHAR(25),
-    Config_Desc  VARCHAR(1000)
+    CONFIG_ID    VARCHAR(15),
+    PARENT_ID    VARCHAR(15),
+    CONFIG_VALUE VARCHAR(25),
+    CONFIG_DESC  VARCHAR(1000)
 );
 
-ALTER TABLE MRT_DATA.CONFIGURATIONS ALTER COLUMN Config_ID SET NOT NULL;
-CREATE PRIMARY KEY IF NOT EXISTS MRT_DATA.CONFIG_PK ON MRT_DATA.CONFIGURATIONS(Config_ID);
-ALTER TABLE MRT_DATA.CONFIGURATIONS ALTER COLUMN Config_Value SET NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS MRT_DATA.IDX_CONFIG ON MRT_DATA.CONFIGURATIONS(Parent_ID,Config_Value);
+ALTER TABLE MRT_DATA.CONFIGURATIONS ALTER COLUMN CONFIG_ID SET NOT NULL;
+ALTER TABLE MRT_DATA.CONFIGURATIONS ALTER COLUMN PARENT_ID SET NOT NULL;
+ALTER TABLE MRT_DATA.CONFIGURATIONS ALTER COLUMN CONFIG_VALUE SET NOT NULL;
+
+ALTER TABLE MRT_DATA.CONFIGURATIONS ALTER COLUMN CONFIG_ID SET DEFAULT MRT_DATA.NEW_PID(NEXTVAL('MRT_DATA.CONFIG_SEQ'));
+ALTER TABLE MRT_DATA.CONFIGURATIONS ALTER COLUMN PARENT_ID SET DEFAULT '0';
+
+CREATE PRIMARY KEY IF NOT EXISTS MRT_DATA.CONFIG_PK ON MRT_DATA.CONFIGURATIONS(CONFIG_ID);
+CREATE UNIQUE INDEX IF NOT EXISTS MRT_DATA.IDX_CONFIG ON MRT_DATA.CONFIGURATIONS(PARENT_ID,CONFIG_VALUE);
 /*************************************************************************************************************
 **  End: Configuration Table
 *************************************************************************************************************/
@@ -66,15 +72,92 @@ GRANT SELECT,INSERT,UPDATE,DELETE ON MRT_DATA.CONFIGURATIONS TO MRT_USERS;
 /*************************************************************************************************************
 **  Block: Configuration Default Values
 *************************************************************************************************************/
-MERGE INTO MRT_DATA.CONFIGURATIONS conf
-    USING (SELECT 'Unit Type' Config_Value,
-                  'Types Of Units' Config_Desc
-           FROM DUAL) AS fnoc
-    ON (conf.Config_Value = fnoc.Config_Value AND
-        conf.Config_Desc  = fnoc.Config_Desc)
-    WHEN NOT MATCHED THEN
-        INSERT (conf.Config_Value,conf.Config_Desc)
-        VALUES (fnoc.Config_Value,fnoc.Config_Desc);
+MERGE INTO MRT_DATA.CONFIGURATIONS(PARENT_ID, CONFIG_VALUE, CONFIG_DESC) KEY (PARENT_ID,CONFIG_VALUE)
+    SELECT '0','Unit Type','Types Of Units' FROM DUAL
+    UNION ALL
+    SELECT '0','Component Type','Types of military components' FROM DUAL;
+
+MERGE INTO MRT_DATA.CONFIGURATIONS(PARENT_ID, CONFIG_VALUE, CONFIG_DESC) KEY (PARENT_ID,CONFIG_VALUE)
+    SELECT CONFIG_ID                AS PARENT_ID,
+           'Army Unit Type'         AS CONFIG_VALUE,
+           'Types of US Army units' AS CONFIG_DESC
+    FROM MRT_DATA.CONFIGURATIONS
+    WHERE CONFIG_VALUE = 'Unit Type'
+    UNION ALL
+    SELECT CONFIG_ID                AS PARENT_ID,
+           'Air Force Unit Type'         AS CONFIG_VALUE,
+           'Types of US Air Force units' AS CONFIG_DESC
+    FROM MRT_DATA.CONFIGURATIONS
+    WHERE CONFIG_VALUE = 'Unit Type';
 /*************************************************************************************************************
 **  End: Configuration Default Values
+*************************************************************************************************************/
+
+/*************************************************************************************************************
+**  Block: Unit Type View
+*************************************************************************************************************/
+DROP ALIAS IF EXISTS MRT_DATA.VP_ALL_UNIT_TYPES;
+CREATE ALIAS MRT_DATA.VP_ALL_UNIT_TYPES AS $$
+    import java.sql.Connection;
+    import java.sql.ResultSet;
+    import java.sql.SQLException;
+    import java.sql.Types;
+    import org.h2.tools.SimpleResultSet;
+    @CODE
+    ResultSet getAllUnitTypes(final Connection conn) throws SQLException {
+        String sqlStatement =
+            "WITH v_unit_type(CONFIG_ID,PARENT_ID,TYPE_PATH,CONFIG_VALUE,CONFIG_DESC) AS (\n"         +
+            "    SELECT CONFIG_ID,\n"                                                                 +
+            "           PARENT_ID,\n"                                                                 +
+            "           CONCAT('[',CONCAT(CONFIG_ID,']')),\n"                                         +
+            "           CONFIG_VALUE,\n"                                                              +
+            "           CONFIG_DESC\n"                                                                +
+            "    FROM MRT_DATA.CONFIGURATIONS\n"                                                      +
+            "    WHERE PARENT_ID    = '0'\n"                                                          +
+            "      AND CONFIG_VALUE = 'Unit Type'\n"                                                  +
+            "    UNION ALL\n"                                                                         +
+            "    SELECT config.CONFIG_ID,\n"                                                          +
+            "           config.PARENT_ID,\n"                                                          +
+            "           CONCAT(ut.TYPE_PATH,CONCAT('/',CONCAT('[',CONCAT(config.CONFIG_ID,']')))),\n" +
+            "           config.CONFIG_VALUE,\n"                                                       +
+            "           config.CONFIG_DESC\n"                                                         +
+            "    FROM MRT_DATA.CONFIGURATIONS config\n"                                               +
+            "    INNER JOIN v_unit_type ut\n"                                                         +
+            "            ON config.PARENT_ID = ut.CONFIG_ID\n"                                        +
+            "           AND ut.TYPE_PATH NOT LIKE CONCAT('%[',CONCAT(config.CONFIG_ID,']%'))\n"       +
+            ")\n"                                                                                     +
+            "SELECT * FROM v_unit_type ORDER BY TYPE_PATH\n";
+        ResultSet rs = conn.createStatement().executeQuery(sqlStatement);
+        SimpleResultSet srs = new SimpleResultSet();
+        srs.addColumn("CONFIG_ID", Types.VARCHAR, 15, 0);
+        srs.addColumn("PARENT_ID", Types.VARCHAR, 15, 0);
+        srs.addColumn("TYPE_PATH", Types.VARCHAR, 1000, 0);
+        srs.addColumn("CONFIG_VALUE", Types.VARCHAR, 25, 0);
+        srs.addColumn("CONFIG_DESC", Types.VARCHAR, 1000, 0);
+        String url = conn.getMetaData().getURL();
+        if(url.equals("jdbc:columnlist:connection")) {
+            return srs;
+        }
+        try {
+            while(rs.next()) {
+                srs.addRow(rs.getString("CONFIG_ID"),
+                           rs.getString("PARENT_ID"),
+                           rs.getString("TYPE_PATH"),
+                           rs.getString("CONFIG_VALUE"),
+                           rs.getString("CONFIG_DESC")
+                );
+            }
+        } finally {
+            rs.close();
+        }
+        return srs;
+    }
+$$;
+
+/* Alternate version */
+CREATE ALIAS IF NOT EXISTS MRT_DATA.VP_ALL_UNIT_TYPES FOR "net.strangetec.db.Function.getAllUnitTypes";
+
+/* To run query, run [SELECT * FROM MRT_DATA.VP_ALL_UNIT_TYPES();] */
+/*************************************************************************************************************
+**  End: Unit Type View
 *************************************************************************************************************/

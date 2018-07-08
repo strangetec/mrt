@@ -79,7 +79,9 @@ MERGE INTO MRT_DATA.CONFIGURATIONS(PARENT_ID, CONFIG_VALUE, CONFIG_DESC) KEY (PA
     UNION ALL
     SELECT '0','Rank Type','Types of military ranks' FROM DUAL
     UNION ALL
-    SELECT '0','Personnel Status','Legal statuses for personnel' FROM DUAL;
+    SELECT '0','Personnel Status','Legal statuses for personnel' FROM DUAL
+    UNION ALL
+    SELECT '0','Vehicle Type','Types of vehicles' FROM DUAL;
 /*************************************************************************************************************
 **  End: Configuration Default Values
 *************************************************************************************************************/

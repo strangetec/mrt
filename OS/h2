@@ -1,0 +1,106 @@
+#!/bin/sh
+# 
+# /etc/init.d/h2 	This loads the h2 database.
+#
+# chkconfig: 345 87 13
+# description: H2 database
+# pidfile: /opt/h2/app/bin/h2.pid
+#
+# Based in part on a shell script by
+# Vadim Kirilchuk  Oct 13, 2012
+
+### INIT INTRO
+# Service          : H2-Server
+# Short Description: H2-Server
+# Description      : H2 database service
+### END INTRO
+
+H2_HOME=/opt/h2
+H2_BIN=$H2_HOME/app/bin
+H2_DATA=$H2_HOME/data
+JAVA_DIR=/usr/java/latest/bin
+JVM_OPTS=""
+H2_USER=MRT_ADMIN
+H2_ENC_PWORD=$(cat $H2_HOME/scripts/data/access.dat | grep -e ^$H2_USER, | awk -F, '{print $2;}')
+H2_PWORD=$($JAVA_DIR/java -cp $H2_HOME/scripts AES_Encryption decrypt $H2_USER $H2_ENC_PWORD)
+H2_SCHEMA=MRT_INFO
+H2_SCHEMA_ENC=$(cat $H2_HOME/scripts/data/access.dat | grep -e ^$H2_SCHEMA, | awk -F, '{print $2;}')
+H2_SCHEMA_PWD=$($JAVA_DIR/java -cp $H2_HOME/scripts AES_Encryption decrypt $H2_SCHEMA $H2_SCHEMA_ENC)
+H2_TCP_PORT=9094
+
+start() {
+    if [[ -e $H2_BIN/h2.pid ]]; then
+        H2_PID=$(cat $H2_BIN/h2.pid)
+        H2_RUNNING=$(ps -ef | awk '{print $2;}' | grep $H2_PID)
+        if [[ -n $H2_RUNNING ]]; then
+            echo -e "H2 Database is still running"
+            exit 1
+        fi
+    fi
+    $JAVA_DIR/java -Xms256m -Xmx768m -cp $H2_BIN/h2-1.4.197.jar org.h2.tools.Server -tcp -tcpAllowOthers -tcpPort $H2_TCP_PORT -tcpSSL -baseDir $H2_DATA -ifExists $1 &
+    #$JAVA_DIR/java -Xms256m -Xmx768m -cp $H2_BIN/h2-1.4.197.jar org.h2.tools.Server -tcp -tcpAllowOthers -tcpPort $H2_TCP_PORT -baseDir $H2_DATA -ifExists $1 &
+    echo $! > $H2_BIN/h2.pid
+    sleep 5
+    echo -e "H2 Database started. Setting multithreading." | tee -a $H2_HOME/h2.log
+    $JAVA_DIR/java -cp $H2_BIN/h2-1.4.197.jar $JVM_OPTS org.h2.tools.Shell -url "jdbc:h2:ssl://localhost:$H2_TCP_PORT/./mrt_data/mrt_data;CIPHER=AES;FILE_LOCK=SOCKET;IFEXISTS=TRUE;DB_CLOSE_ON_EXIT=FALSE" -user $H2_USER -password "$H2_SCHEMA_PWD $H2_PWORD" -sql "SET MULTI_THREADED 1"
+    chmod 444 $H2_BIN/h2.pid
+    chown h2_user:h2_db $H2_BIN/h2.pid
+}
+
+stop() {
+    if [[ -e $H2_BIN/h2.pid ]]; then
+        PID=$(cat $H2_BIN/h2.pid)
+        PID_CNT=$(ps -ef | awk '{print $2;}' | grep $PID | wc -l)
+        if [[ -n $PID && $PID_CNT -gt 0 ]]; then
+            $JAVA_DIR/java -cp $H2_BIN/h2-1.4.197.jar org.h2.tools.Server -tcpShutdown "ssl://localhost:$H2_TCP_PORT"
+            echo -e "TCP Port Shutdown command sent."
+            kill -TERM ${PID}
+            echo SIGTERM sent to process ${PID}
+            rm -f $H2_BIN/h2.pid
+        else
+            echo -e "File $H2_BIN/h2.pid not found!"
+        fi
+    fi
+}
+
+h2_zap() {
+    rm -f $H2_BIN/h2.pid
+}
+
+backup() {
+    echo -e "No backup defined yet"
+}
+
+restore() {
+    echo -e "No restore defined yet"
+}
+
+case "$1" in
+    init)
+        start
+        ;;
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    zap)
+        h2_zap
+        ;;
+    restart)
+        stop
+        sleep 10
+        start
+        ;;
+    backup)
+        backup
+        ;;
+    restore)
+        restore
+        ;;
+    *)
+        echo -e "Usage: $0 {init|start|stop|restart|backup|restore}"
+        exit 1
+        ;;
+esac

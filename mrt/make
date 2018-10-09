@@ -1,0 +1,176 @@
+#!/bin/bash
+
+# Add the '-x' option to the first line for debugging.
+
+WORKING_DIR=$(dirname ${BASH_SOURCE[0]})
+
+java_compile() {
+    if [[ $# -eq 0 ]]; then
+        javac -cp $WORKING_DIR $WORKING_DIR/*.java
+    else
+        JAVA_FILES=""
+        for ((i = 1; i <= $#; i++)); do
+            FILENAME=$WORKING_DIR/${!i}
+            FILE_NAME=$(basename -- "$FILENAME")
+            F_NAME="${FILE_NAME%.*}"
+            JAVA_FILES="$JAVA_FILES $WORKING_DIR/$F_NAME.java"
+        done
+    javac -cp $WORKING_DIR $JAVA_FILES
+    fi
+}
+
+class_rm() {
+    if [[ $# -eq 0 ]]; then
+        CLASSES=$(ls $WORKING_DIR/*.class | wc -l)
+        if [[ $CLASSES -gt 0 ]]; then
+            rm -v $WORKING_DIR/*.class
+        fi
+    else
+        CLASS_DEL=""
+        for ((i = 1; i <= $#; i++)); do
+            FILENAME=$WORKING_DIR/${!i}
+            FILE_NAME=$(basename -- "$FILENAME")
+            F_NAME="${FILE_NAME%.*}"
+            CLASS_FILE="$WORKING_DIR/$F_NAME.class"
+            CLASSES=$(ls $CLASS_FILE | grep -v "cannot access" | wc -l)
+            if [[ $CLASSES -gt 0 ]]; then
+                rm -v $CLASS_FILE
+            fi
+        done
+    fi
+}
+
+usage(){
+    echo "Usage make [-h] [clean [-f \"file1 file2 file3...\"]] [compile [-f \"file1 file2 file3...\"]] [jar [-c] [-j jar_file] [-f \"file1 file2 file3...\"]]" 
+    echo "no options   See clean"
+    echo "  -h         Display help message"
+    echo "  clean      Delete all class files, then recompile"
+    echo "     -f      Delete listed java files, then recompile. File names must be in double quotes."
+    echo "  compile    Compile all java files"
+    echo "       -f    Compile listed java files. File names must be in double quotes"
+    echo "  jar        Create jar file with all java files"
+    echo "   -c        Run a clean compile of the java files."
+    echo "   -j        Create jar file with the specified name."
+    echo "   -f        Create jar file using listed java files."
+    echo "Note: Do not put file extensions on files names."
+}
+
+jar_file() {
+    FILENAME=$WORKING_DIR/$1
+    FILE_NAME=$(basename -- "$FILENAME")
+    F_NAME="${FILE_NAME%.*}"
+    JAR_CNT=$(ls $WORKING_DIR/$F_NAME.jar | grep -v "cannot access" | wc -l)
+    JAR_FILE=$WORKING_DIR/$F_NAME.jar
+    JAVA_FILES="$WORKING_DIR/*.class"
+    if [[ $JAR_CNT -gt 0 ]]; then
+        rm -v $WORKING_DIR/$F_NAME.jar
+    fi
+    if [[ $# -gt 1 ]]; then
+        JAVA_FILES=""
+        for ((i=2; i <= $#; i++)); do
+            FILENAME=$WORKING_DIR/${!i}
+            FILE_NAME=$(basename -- "$FILENAME")
+            F_NAME="${FILE_NAME%.*}"
+            JAVA_FILES="$JAVA_FILES $WORKING_DIR/$F_NAME.class"
+        done
+    fi
+    jar cvfm $JAR_FILE manifest.txt $JAVA_FILES $WORKING_DIR/*.png
+}
+
+while getopts ":h" opt; do
+    case ${opt} in
+        h )
+            usage
+            exit 0
+            ;;
+        \? )
+            echo "Invalid Option: -$OPTARG" >&2
+            usage
+            exit 1
+            ;;
+        esac
+done
+shift $((OPTIND -1))
+
+subcmd=$1
+shift
+JAVA_FILES=""
+JAR_FILES="out"
+case "$subcmd" in
+    clean)
+        echo "Running clean compile."
+        while getopts ":f:" opt; do
+            JAVA_FILES=""
+            case ${opt} in
+                f )
+                    JAVA_FILES=$OPTARG
+                    ;;
+                \? )
+                    echo "Invalid Option: -$OPTARG" >&2
+                    usage
+                    exit 1
+                    ;;
+            esac
+        done
+        class_rm $JAVA_FILES
+        java_compile $JAVA_FILES
+        exit 0
+        shift $((OPTIND -1))
+        ;;
+    compile)
+        echo "Running compile."
+        JAVA_FILES=""
+        while getopts ":f:" opt; do
+            case ${opt} in
+                f )
+                    JAVA_FILES=$OPTARG
+                    ;;
+                \? )
+                    echo "Invalid Option: -$OPTARG" >&2
+                    exit 1
+                    ;;
+                : )
+                    java_compile
+                    exit 0
+                    ;;
+            esac
+        done
+        java_compile $JAVA_FILES
+        exit 0
+        shift $((OPTIND -1))
+        ;;
+    jar)
+        echo "Creating JAR file."
+        JAVA_FILES=""
+    CLEAN_INSTALL="NO"
+        while getopts ":f:j:c" opt; do
+            case ${opt} in
+                j )
+                    JAR_FILES=$OPTARG
+                    ;;
+                f )
+                    JAVA_FILES=$OPTARG
+                    ;;
+                c )
+                    CLEAN_INSTALL="YES"
+                    ;;
+                \? )
+                    echo "Invalid Option: -$OPTARG" >&2
+                    exit 1
+                    ;;
+            esac
+        done
+    if [[ "$CLEAN_INSTALL" == "YES" ]]; then
+        class_rm $JAVA_FILES
+        java_compile $JAVA_FILES
+    fi
+        jar_file $JAR_FILES $JAVA_FILES
+        exit 0
+        shift $((OPTIND -1))
+        ;;
+    *)
+        echo "Invalid option $subcmd." >&2
+        usage
+        exit 1
+        ;;
+esac

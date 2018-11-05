@@ -1,7 +1,0 @@
-Manifest-Version: 0.1
-Created-By: Strange Technologies (Elfin D. Strange)
-Package-Name: mrt
-Sealed: true
-
-Name: ./mrt_logo.png
-Content-Type: image/png
